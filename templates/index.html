@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Video Downloader</title>
+
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+        background-color: #f4f7f6;
+      }
+
+      .container {
+        background: white;
+        padding: 2rem;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        width: 100%;
+        max-width: 500px;
+        text-align: center;
+      }
+
+      h1 {
+        margin-bottom: 1.5rem;
+        color: #333;
+      }
+
+      #download-form {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      #url {
+        padding: 0.75rem;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-size: 1rem;
+      }
+
+      button {
+        padding: 0.75rem;
+        border: none;
+        border-radius: 4px;
+        background-color: #007bff;
+        color: white;
+        font-size: 1rem;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      }
+
+      button:hover {
+        background-color: #0056b3;
+      }
+
+      .message {
+        margin-top: 1rem;
+        padding: 0.75rem;
+        border-radius: 4px;
+        display: none;
+      }
+
+      .message.info {
+        display: block;
+        background-color: #e2f3ff;
+        color: #005f9e;
+      }
+
+      .message.success {
+        display: block;
+        background-color: #d4edda;
+        color: #155724;
+      }
+
+      .message.error {
+        display: block;
+        background-color: #f8d7da;
+        color: #721c24;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Video Downloader</h1>
+      <form id="download-form">
+        <input
+          type="text"
+          id="url"
+          name="url"
+          placeholder="Enter video URL"
+          required
+        />
+        <button type="submit">Download</button>
+      </form>
+      <div id="message" class="message"></div>
+    </div>
+
+    <script>
+      document
+        .getElementById("download-form")
+        .addEventListener("submit", async function (event) {
+          event.preventDefault();
+
+          const form = event.target;
+          const url = form.elements.url.value;
+          const messageDiv = document.getElementById("message");
+
+          messageDiv.textContent = "Starting download...";
+          messageDiv.className = "message info";
+
+          try {
+            const response = await fetch("/download", {
+              method: "POST",
+              body: new URLSearchParams(new FormData(form)),
+            });
+
+            if (response.ok) {
+              messageDiv.textContent = "Download started successfully!";
+              messageDiv.className = "message success";
+
+              // Trigger the file download
+              const blob = await response.blob();
+              const contentDisposition = response.headers.get(
+                "content-disposition"
+              );
+              let filename = "downloaded_video.mp4";
+              if (contentDisposition) {
+                const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+                const matches = filenameRegex.exec(contentDisposition);
+                if (matches != null && matches[1]) {
+                  filename = matches[1].replace(/['"]/g, "");
+                }
+              }
+
+              const link = document.createElement("a");
+              link.href = window.URL.createObjectURL(blob);
+              link.download = filename;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            } else {
+              const errorData = await response.json();
+              messageDiv.textContent = `Error: ${errorData.error}`;
+              messageDiv.className = "message error";
+            }
+          } catch (error) {
+            messageDiv.textContent = `An unexpected error occurred: ${error.message}`;
+            messageDiv.className = "message error";
+          }
+        });
+    </script>
+  </body>
+</html>
