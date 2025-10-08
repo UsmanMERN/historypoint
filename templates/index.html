@@ -60,6 +60,11 @@
         background-color: #0056b3;
       }
 
+      button:disabled {
+        background-color: #6c757d;
+        cursor: not-allowed;
+      }
+
       .message {
         margin-top: 1rem;
         padding: 0.75rem;
@@ -84,6 +89,22 @@
         background-color: #f8d7da;
         color: #721c24;
       }
+
+      #progress {
+        display: none;
+        margin-top: 1rem;
+      }
+
+      #progress-bar {
+        width: 100%;
+        height: 20px;
+      }
+
+      #percent {
+        text-align: center;
+        margin-top: 0.5rem;
+        font-weight: bold;
+      }
     </style>
   </head>
   <body>
@@ -97,63 +118,152 @@
           placeholder="Enter video URL"
           required
         />
-        <button type="submit">Download</button>
+        <button type="submit" id="download-btn">Download</button>
       </form>
+      <div id="progress">
+        <progress id="progress-bar" value="0" max="100"></progress>
+        <div id="percent">0%</div>
+      </div>
       <div id="message" class="message"></div>
     </div>
 
     <script>
       document
         .getElementById("download-form")
-        .addEventListener("submit", async function (event) {
+        .addEventListener("submit", function (event) {
           event.preventDefault();
 
           const form = event.target;
           const url = form.elements.url.value;
           const messageDiv = document.getElementById("message");
+          const progressDiv = document.getElementById("progress");
+          const progressBar = document.getElementById("progress-bar");
+          const percentSpan = document.getElementById("percent");
+          const downloadBtn = document.getElementById("download-btn");
 
+          // Reset
+          messageDiv.style.display = "none";
+          progressDiv.style.display = "none";
+          downloadBtn.disabled = true;
+
+          // Start
           messageDiv.textContent = "Starting download...";
           messageDiv.className = "message info";
+          messageDiv.style.display = "block";
+          progressDiv.style.display = "block";
+          progressBar.value = 0;
+          percentSpan.textContent = "0%";
 
-          try {
-            const response = await fetch("/download", {
-              method: "POST",
-              body: new URLSearchParams(new FormData(form)),
-            });
+          const formData = new FormData();
+          formData.append("url", url);
 
-            if (response.ok) {
-              messageDiv.textContent = "Download started successfully!";
-              messageDiv.className = "message success";
+          const postXhr = new XMLHttpRequest();
+          postXhr.open("POST", "/download", true);
 
-              // Trigger the file download
-              const blob = await response.blob();
-              const contentDisposition = response.headers.get(
-                "content-disposition"
-              );
-              let filename = "downloaded_video.mp4";
-              if (contentDisposition) {
-                const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
-                const matches = filenameRegex.exec(contentDisposition);
-                if (matches != null && matches[1]) {
-                  filename = matches[1].replace(/['"]/g, "");
+          postXhr.addEventListener("load", function () {
+            if (postXhr.status === 200) {
+              try {
+                const data = JSON.parse(postXhr.responseText);
+                const taskId = data.task_id;
+
+                messageDiv.textContent = "Downloading video...";
+                messageDiv.className = "message info";
+
+                let polling = true;
+
+                function poll() {
+                  if (!polling) return;
+
+                  const getXhr = new XMLHttpRequest();
+                  getXhr.open("GET", `/progress/${taskId}`, true);
+
+                  getXhr.addEventListener("load", function () {
+                    if (getXhr.status === 200) {
+                      try {
+                        const task = JSON.parse(getXhr.responseText);
+                        const percent = task.progress || 0;
+                        progressBar.value = percent;
+                        percentSpan.textContent = Math.round(percent) + "%";
+
+                        if (task.done) {
+                          polling = false;
+                          progressDiv.style.display = "none";
+                          if (task.error) {
+                            messageDiv.textContent = task.error;
+                            messageDiv.className = "message error";
+                          } else {
+                            messageDiv.textContent =
+                              "Download completed successfully!";
+                            messageDiv.className = "message success";
+
+                            const filename =
+                              task.filename || "downloaded_video.mp4";
+                            const link = document.createElement("a");
+                            link.href = `/file/${taskId}`;
+                            link.download = filename;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                          }
+                          downloadBtn.disabled = false;
+                        } else {
+                          setTimeout(poll, 500);
+                        }
+                      } catch (e) {
+                        // Parse error
+                        polling = false;
+                        messageDiv.textContent =
+                          "Error parsing progress update.";
+                        messageDiv.className = "message error";
+                        downloadBtn.disabled = false;
+                      }
+                    } else {
+                      // Poll error, retry
+                      setTimeout(poll, 1000);
+                    }
+                  });
+
+                  getXhr.addEventListener("error", function () {
+                    polling = false;
+                    messageDiv.textContent =
+                      "Network error while checking progress.";
+                    messageDiv.className = "message error";
+                    downloadBtn.disabled = false;
+                  });
+
+                  getXhr.send();
                 }
-              }
 
-              const link = document.createElement("a");
-              link.href = window.URL.createObjectURL(blob);
-              link.download = filename;
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
+                poll();
+              } catch (e) {
+                messageDiv.textContent = "Error starting download.";
+                messageDiv.className = "message error";
+                downloadBtn.disabled = false;
+              }
             } else {
-              const errorData = await response.json();
-              messageDiv.textContent = `Error: ${errorData.error}`;
+              let errorMsg = `Error: ${postXhr.statusText}`;
+              try {
+                const errorData = JSON.parse(postXhr.responseText);
+                errorMsg = `Error: ${errorData.error}`;
+              } catch (e) {
+                // Ignore
+              }
+              messageDiv.textContent = errorMsg;
               messageDiv.className = "message error";
+              progressDiv.style.display = "none";
+              downloadBtn.disabled = false;
             }
-          } catch (error) {
-            messageDiv.textContent = `An unexpected error occurred: ${error.message}`;
+          });
+
+          postXhr.addEventListener("error", function () {
+            messageDiv.textContent =
+              "An unexpected error occurred: Network issue";
             messageDiv.className = "message error";
-          }
+            progressDiv.style.display = "none";
+            downloadBtn.disabled = false;
+          });
+
+          postXhr.send(formData);
         });
     </script>
   </body>
